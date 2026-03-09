@@ -1,0 +1,183 @@
+"""
+Instagram Reels automation bot — entry point.
+Run: python main.py
+Starts browser, ensures login, opens Reels, runs infinite engagement loop with niche detection and source rotation.
+"""
+import asyncio
+import random
+import sys
+
+from dotenv import load_dotenv
+
+from config import (
+    REELS_URL,
+    TARGET_HASHTAGS,
+    REELS_PER_SOURCE_BEFORE_SWITCH,
+    FOLLOW_COMMENTER_PROBABILITY,
+    REEL_CREATOR_FOLLOW_PROBABILITY,
+    LIKE_RANDOM_COMMENT_PROBABILITY,
+    COMMENT_USE_AI_PROBABILITY,
+)
+from bot.browser import create_browser
+from bot.reels_scroller import (
+    open_reels,
+    open_hashtag_reels,
+    scroll_to_next,
+    get_current_caption,
+    get_current_hashtags,
+    get_current_author_username,
+    dismiss_notification_modal,
+)
+from bot.actions import (
+    decide_action,
+    perform_like,
+    perform_comment,
+    perform_follow,
+    perform_skip,
+    try_follow_random_commenter,
+    like_random_comments,
+    can_follow_more,
+)
+from bot.delays import like_delay, comment_delay, follow_delay, scroll_delay, random_idle, watch_reel_delay
+from ai.niche_classifier import get_niche
+from ai.niche_classifier import NICHE_OTHER
+from ai.comment_generator import get_comment
+from utils.logger import logger, log_reel_viewed, log_skipped_not_niche
+from utils import session_report
+
+load_dotenv()
+
+
+def _build_sources():
+    """(kind, param) where kind is 'feed' or 'hashtag', param is tag or None."""
+    sources = [("feed", None)]
+    for tag in TARGET_HASHTAGS:
+        sources.append(("hashtag", tag))
+    return sources
+
+
+async def _open_current_source(page, kind: str, param) -> None:
+    """Open reels for the given source type."""
+    if kind == "feed":
+        await open_reels(page)
+    else:
+        await open_hashtag_reels(page, param)
+
+
+async def run_loop(page, sources: list, current_index: int) -> None:
+    """Single reel iteration: watch reel, niche check, decide action (like/comment/follow/skip), scroll."""
+    await dismiss_notification_modal(page)
+    kind, param = sources[current_index]
+    url = page.url
+    if "/stories/" in url:
+        await open_reels(page)
+        return
+    if "/reel" in url and "instagram.com/reels" not in url.split("?")[0]:
+        try:
+            await page.goto(REELS_URL, wait_until="domcontentloaded", timeout=15000)
+        except Exception:
+            pass
+        return
+    log_reel_viewed()
+    session_report.log_reel_viewed()
+    await watch_reel_delay()
+    caption = await get_current_caption(page)
+    hashtags = await get_current_hashtags(page)
+    niche = get_niche(caption, hashtags)
+    if niche == NICHE_OTHER:
+        log_skipped_not_niche()
+        await scroll_to_next(page)
+        return
+    author = await get_current_author_username(page)
+    if not author:
+        await asyncio.sleep(0.5)
+        author = await get_current_author_username(page)
+    reel_url = page.url
+    action = decide_action(is_niche_match=True)
+    if action == "like":
+        await perform_like(page)
+        a = author or await get_current_author_username(page)
+        session_report.log_like(reel_url, a)
+        await like_delay()
+    elif action == "comment":
+        use_ai = random.random() < COMMENT_USE_AI_PROBABILITY
+        text = get_comment(caption, niche, use_ai=use_ai)
+        await perform_comment(page, text)
+        session_report.log_comment(reel_url, author, text)
+        await comment_delay()
+    elif action == "follow":
+        if author:
+            await perform_follow(page, author, skip_bio_check=True)
+            session_report.log_follow(author)
+            await _open_current_source(page, kind, param)
+        await follow_delay()
+    else:
+        await perform_skip()
+    if action != "follow" and author and can_follow_more() and random.random() < REEL_CREATOR_FOLLOW_PROBABILITY:
+        try:
+            logger.info("Following reel creator: @%s", author)
+            await perform_follow(page, author, skip_bio_check=True)
+            session_report.log_follow(author)
+            await _open_current_source(page, kind, param)
+        except Exception:
+            pass
+    if random.random() < FOLLOW_COMMENTER_PROBABILITY:
+        try:
+            ok, followed_username = await try_follow_random_commenter(page)
+            if ok and followed_username:
+                session_report.log_follow(followed_username)
+                await _open_current_source(page, kind, param)
+        except Exception:
+            pass
+    if random.random() < LIKE_RANDOM_COMMENT_PROBABILITY:
+        try:
+            n = await like_random_comments(page, max_likes=2)
+            if n > 0:
+                session_report.log_comment_likes(n)
+        except Exception:
+            pass
+    if random.random() < 0.3:
+        try:
+            await page.mouse.move(random.randint(100, 400), random.randint(100, 400))
+        except Exception:
+            pass
+    await random_idle()
+    await scroll_to_next(page)
+
+
+async def main_async() -> None:
+    print("Instagram Bot Started")
+    report_path = session_report.start_session()
+    print(f"Session report (live): {report_path}")
+    sources = _build_sources()
+    current_index = 0
+    reels_count = 0
+    browser = context = page = None
+    try:
+        browser, context, page = await create_browser(headless=False)
+        await _open_current_source(page, "feed", None)
+        while True:
+            await run_loop(page, sources, current_index)
+            reels_count += 1
+            if REELS_PER_SOURCE_BEFORE_SWITCH and reels_count >= REELS_PER_SOURCE_BEFORE_SWITCH:
+                current_index = (current_index + 1) % len(sources)
+                reels_count = 0
+                kind, param = sources[current_index]
+                await _open_current_source(page, kind, param)
+            await asyncio.sleep(0.5)
+    except KeyboardInterrupt:
+        logger.info("Stopped by user")
+    except Exception as e:
+        logger.exception("Error: %s", e)
+        sys.exit(1)
+    finally:
+        if browser:
+            await browser.close()
+
+
+def main() -> None:
+    asyncio.run(main_async())
+
+
+if __name__ == "__main__":
+    main()

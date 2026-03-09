@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Environment / secrets
+.env
+instagram_bot/.env
+
+# Playwright / browsers
+playwright/.cache/
+
+# Bot runtime artifacts
+instagram_bot/bot/session_cookies.json
+session_report_*.html
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+
