@@ -83,6 +83,12 @@ MAX_COMMENTS_PER_HOUR = 8
 MAX_FOLLOWS_PER_HOUR = 6
 MAX_SESSION_HOURS = 4
 
+# --- Anti-spam: avoid repeatedly engaging same creator/reel ---
+# Max total engagements (like/comment/follow) per author per session.
+AUTHOR_MAX_ENGAGEMENTS_PER_SESSION = 2
+# Skip doing actions if we see the same reel URL again in-session.
+RECENT_REEL_DEDUP_MAX = 50
+
 # --- Delay ranges (seconds) - more spread = less bot-like ---
 REEL_WATCH_MIN = 6
 REEL_WATCH_MAX = 20

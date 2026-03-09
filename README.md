@@ -83,24 +83,24 @@ ig-growth/
 
 ```mermaid
 flowchart TD
-  A[Start bot] --> B[Load .env + config]
-  B --> C[Launch Playwright browser]
-  C --> D[Load cookies (if exist)]
+  A[Start bot] --> B[Load env + config]
+  B --> C[Launch browser]
+  C --> D[Load cookies]
   D --> E{Logged in?}
-  E -- No --> F[Login + handle challenge/2FA]
-  E -- Yes --> G[Open Reels feed / Hashtag source]
+  E -- No --> F[Manual login / 2FA]
+  E -- Yes --> G[Open source (feed or hashtag)]
   F --> G
 
-  G --> H[Watch reel (random)]
-  H --> I[Extract caption + hashtags + author]
-  I --> J[Niche detection: keywords → AI fallback]
-  J --> K{Niche?}
-  K -- No --> S[Scroll to next reel]
-  K -- Yes --> L[Decide action by weights + limits]
-  L --> M[Like / Comment / Follow / Skip]
-  M --> N[Optional: follow commenter]
-  N --> O[Optional: like random comments]
-  O --> P[Update live session report]
+  G --> H[Watch reel]
+  H --> I[Get caption + hashtags + author]
+  I --> J[Niche detection (keywords + AI)]
+  J --> K{Is niche match?}
+  K -- No --> S[Scroll to next]
+  K -- Yes --> L[Pick action (like / comment / follow / skip)]
+  L --> M[Run action]
+  M --> N[Maybe follow commenter]
+  N --> O[Maybe like comments]
+  O --> P[Update session report]
   P --> S
   S --> H
 ```

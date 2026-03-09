@@ -17,6 +17,8 @@ from config import (
     REEL_CREATOR_FOLLOW_PROBABILITY,
     LIKE_RANDOM_COMMENT_PROBABILITY,
     COMMENT_USE_AI_PROBABILITY,
+    AUTHOR_MAX_ENGAGEMENTS_PER_SESSION,
+    RECENT_REEL_DEDUP_MAX,
 )
 from bot.browser import create_browser
 from bot.reels_scroller import (
@@ -46,6 +48,45 @@ from utils.logger import logger, log_reel_viewed, log_skipped_not_niche
 from utils import session_report
 
 load_dotenv()
+
+_recent_reel_urls: list[str] = []
+_author_engagements: dict[str, int] = {}
+
+
+def _norm_reel_url(url: str) -> str:
+    return (url or "").split("?")[0].strip()
+
+
+def _remember_reel(url: str) -> None:
+    u = _norm_reel_url(url)
+    if not u:
+        return
+    _recent_reel_urls.append(u)
+    if len(_recent_reel_urls) > RECENT_REEL_DEDUP_MAX:
+        del _recent_reel_urls[:-RECENT_REEL_DEDUP_MAX]
+
+
+def _seen_reel(url: str) -> bool:
+    u = _norm_reel_url(url)
+    return bool(u and u in _recent_reel_urls)
+
+
+def _norm_user(u: str | None) -> str:
+    return (u or "").strip().lstrip("@").lower()
+
+
+def _can_engage_author(author: str | None) -> bool:
+    a = _norm_user(author)
+    if not a:
+        return True
+    return _author_engagements.get(a, 0) < AUTHOR_MAX_ENGAGEMENTS_PER_SESSION
+
+
+def _mark_author_engagement(author: str | None) -> None:
+    a = _norm_user(author)
+    if not a:
+        return
+    _author_engagements[a] = _author_engagements.get(a, 0) + 1
 
 
 def _build_sources():
@@ -78,6 +119,11 @@ async def run_loop(page, sources: list, current_index: int) -> None:
         except Exception:
             pass
         return
+    reel_url = page.url
+    if _seen_reel(reel_url):
+        await scroll_to_next(page)
+        return
+    _remember_reel(reel_url)
     log_reel_viewed()
     session_report.log_reel_viewed()
     await watch_reel_delay()
@@ -94,21 +140,26 @@ async def run_loop(page, sources: list, current_index: int) -> None:
         author = await get_current_author_username(page)
     reel_url = page.url
     action = decide_action(is_niche_match=True)
+    if not _can_engage_author(author) and action in ("like", "comment", "follow"):
+        action = "skip"
     if action == "like":
         await perform_like(page)
         a = author or await get_current_author_username(page)
         session_report.log_like(reel_url, a)
+        _mark_author_engagement(a)
         await like_delay()
     elif action == "comment":
         use_ai = random.random() < COMMENT_USE_AI_PROBABILITY
         text = get_comment(caption, niche, use_ai=use_ai)
         await perform_comment(page, text)
         session_report.log_comment(reel_url, author, text)
+        _mark_author_engagement(author)
         await comment_delay()
     elif action == "follow":
         if author:
             await perform_follow(page, author, skip_bio_check=True)
             session_report.log_follow(author)
+            _mark_author_engagement(author)
             await _open_current_source(page, kind, param)
         await follow_delay()
     else:
@@ -118,6 +169,7 @@ async def run_loop(page, sources: list, current_index: int) -> None:
             logger.info("Following reel creator: @%s", author)
             await perform_follow(page, author, skip_bio_check=True)
             session_report.log_follow(author)
+            _mark_author_engagement(author)
             await _open_current_source(page, kind, param)
         except Exception:
             pass
