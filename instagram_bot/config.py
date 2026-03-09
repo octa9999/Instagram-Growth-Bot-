@@ -144,3 +144,61 @@ OPENROUTER_MODEL = "stepfun/step-3.5-flash:free"
 
 # --- Source rotation: reels per source before switching (optional) ---
 REELS_PER_SOURCE_BEFORE_SWITCH = 10
+
+# =============================================================================
+# TikTok (experimental, higher ban risk — keep limits low and sessions short)
+# =============================================================================
+
+TIKTOK_BASE_URL = "https://www.tiktok.com/"
+
+# TikTok search / priming keywords (similar niche to Instagram config)
+TIKTOK_SEARCH_KEYWORDS = [
+    "ui design",
+    "figma tips",
+    "product design",
+    "web design",
+    "saas founder",
+    "indie hacker",
+    "build in public",
+    "developer tools",
+]
+
+# TikTok selectors (2026 web layout; may need updates over time)
+TIKTOK_VIDEO_CONTAINER = '[data-e2e="recommend-list-item-container"]'
+TIKTOK_LIKE_BUTTON = 'button[data-e2e="browse-like-icon"]'
+TIKTOK_COMMENT_BUTTON = 'button[data-e2e="browse-comment-icon"]'
+TIKTOK_COMMENT_INPUT = 'div[data-e2e="comment-input"] [role="textbox"]'
+TIKTOK_SHARE_BUTTON = 'button[data-e2e="browse-share-group"]'
+TIKTOK_AUTHOR_USERNAME = '[data-e2e="browse-username"]'
+TIKTOK_VIDEO_CAPTION = '[data-e2e="browse-video-desc"]'
+
+# --- TikTok engagement probabilities when video is niche match ---
+TIKTOK_LIKE_PROBABILITY = 0.50
+TIKTOK_COMMENT_PROBABILITY = 0.35
+TIKTOK_FOLLOW_PROBABILITY = 0.20
+TIKTOK_COPYLINK_PROBABILITY = 0.15
+
+# --- TikTok safety limits (per hour, conservative) ---
+# TikTok is stricter than Instagram and explicitly bans most automation.
+TIKTOK_MAX_LIKES_PER_HOUR = 15
+TIKTOK_MAX_COMMENTS_PER_HOUR = 6
+TIKTOK_MAX_FOLLOWS_PER_HOUR = 5
+TIKTOK_MAX_COPYLINKS_PER_HOUR = 4
+TIKTOK_MAX_SESSION_MINUTES = 45
+
+# --- TikTok watch / delay ranges (seconds) ---
+TIKTOK_WATCH_NICHE_MIN = 12
+TIKTOK_WATCH_NICHE_MAX = 25
+TIKTOK_WATCH_NON_NICHE_MIN = 2
+TIKTOK_WATCH_NON_NICHE_MAX = 5
+
+TIKTOK_SCROLL_DELAY_MIN = 2
+TIKTOK_SCROLL_DELAY_MAX = 6
+
+TIKTOK_COMMENT_IDLE_AFTER_N = 3  # comments before long idle
+TIKTOK_COMMENT_IDLE_MIN = 10
+TIKTOK_COMMENT_IDLE_MAX = 30
+
+# Optional: enable OCR for text-on-screen hooks (requires pytesseract + Tesseract binary)
+ENABLE_TIKTOK_OCR = False
+

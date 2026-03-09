@@ -19,8 +19,9 @@ from config import (
     COMMENT_USE_AI_PROBABILITY,
     AUTHOR_MAX_ENGAGEMENTS_PER_SESSION,
     RECENT_REEL_DEDUP_MAX,
+    TIKTOK_MAX_SESSION_MINUTES,
 )
-from bot.browser import create_browser
+from bot.browser import create_browser, create_browser_no_login
 from bot.reels_scroller import (
     open_reels,
     open_hashtag_reels,
@@ -41,8 +42,28 @@ from bot.actions import (
     can_follow_more,
 )
 from bot.delays import like_delay, comment_delay, follow_delay, scroll_delay, random_idle, watch_reel_delay
-from ai.niche_classifier import get_niche
-from ai.niche_classifier import NICHE_OTHER
+from bot.tiktok_scroller import (
+    open_tiktok,
+    open_search_and_prime,
+    scroll_to_next_video,
+    watch_video as watch_tiktok_video,
+    get_current_caption as get_tiktok_caption,
+    get_current_author_username as get_tiktok_author,
+    get_current_video_url,
+)
+from bot.tiktok_actions import (
+    decide_tiktok_action,
+    perform_tiktok_like,
+    perform_tiktok_comment,
+    perform_tiktok_follow,
+    perform_tiktok_copy_link,
+)
+from ai.niche_classifier import (
+    get_niche,
+    get_niche_with_extra_text,
+    extract_tiktok_ocr_text,
+    NICHE_OTHER,
+)
 from ai.comment_generator import get_comment
 from utils.logger import logger, log_reel_viewed, log_skipped_not_niche
 from utils import session_report
@@ -198,9 +219,27 @@ async def run_loop(page, sources: list, current_index: int) -> None:
 
 
 async def main_async() -> None:
-    print("Instagram Bot Started")
+    # Simple CLI switch: default IG, TikTok when '--platform=tt' or 'tt' present
+    platform = "ig"
+    for arg in sys.argv[1:]:
+        lower = arg.lower()
+        if lower in ("--platform=tt", "--platform=tiktok", "tt", "tiktok"):
+            platform = "tt"
+        elif lower in ("--platform=ig", "--platform=instagram", "ig", "instagram"):
+            platform = "ig"
+
     report_path = session_report.start_session()
     print(f"Session report (live): {report_path}")
+
+    if platform == "tt":
+        print("TikTok Bot Started (experimental, higher ban risk)")
+        await _run_tiktok_main()
+    else:
+        print("Instagram Bot Started")
+        await _run_instagram_main()
+
+
+async def _run_instagram_main() -> None:
     sources = _build_sources()
     current_index = 0
     reels_count = 0
@@ -227,9 +266,68 @@ async def main_async() -> None:
             await browser.close()
 
 
+async def _run_tiktok_main() -> None:
+    """
+    TikTok entry flow (no login automation; user should already be logged into TikTok in this browser profile).
+    """
+    browser = context = page = None
+    loop = asyncio.get_event_loop()
+    start_time = loop.time()
+    try:
+        browser, context, page = await create_browser_no_login(headless=False)
+        await open_tiktok(page)
+        await open_search_and_prime(page)
+        while True:
+            elapsed_min = (loop.time() - start_time) / 60.0
+            if elapsed_min >= TIKTOK_MAX_SESSION_MINUTES:
+                logger.info("TikTok session reached max minutes (%.1f), stopping.", elapsed_min)
+                break
+
+            caption = await get_tiktok_caption(page)
+            hashtags: list[str] = []
+            ocr_text = await extract_tiktok_ocr_text(page)
+            niche = get_niche_with_extra_text(caption, hashtags, ocr_text)
+            is_niche = niche != NICHE_OTHER
+
+            if is_niche:
+                await watch_tiktok_video(page, is_niche=True)
+                author = await get_tiktok_author(page)
+                video_url = await get_current_video_url(page)
+                action = decide_tiktok_action(is_niche_match=True)
+                if action == "like":
+                    await perform_tiktok_like(page)
+                    session_report.log_like(video_url, author)
+                elif action == "comment":
+                    # Reuse existing IG comment generator for TikTok caption / OCR text
+                    from ai.comment_generator import get_comment as get_ig_comment
+
+                    text = get_ig_comment(caption or ocr_text, niche)
+                    await perform_tiktok_comment(page, text)
+                    session_report.log_comment(video_url, author, text)
+                elif action == "follow":
+                    await perform_tiktok_follow(page, author)
+                    session_report.log_follow(author)
+                elif action == "copylink":
+                    await perform_tiktok_copy_link(page)
+                await random_idle()
+            else:
+                await watch_tiktok_video(page, is_niche=False)
+
+            await scroll_to_next_video(page)
+            session_report.log_reel_viewed()
+    except KeyboardInterrupt:
+        logger.info("Stopped by user")
+    except Exception as e:
+        logger.exception("TikTok error: %s", e)
+    finally:
+        if browser:
+            await browser.close()
+
+
 def main() -> None:
     asyncio.run(main_async())
 
 
 if __name__ == "__main__":
     main()
+

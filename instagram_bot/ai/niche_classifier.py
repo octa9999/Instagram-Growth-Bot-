@@ -12,6 +12,7 @@ from config import (
     NICHE_KEYWORDS_DESIGN,
     NICHE_KEYWORDS_FOUNDER,
     NICHE_KEYWORDS_DEVELOPER,
+    ENABLE_TIKTOK_OCR,
 )
 from utils.logger import logger
 
@@ -105,3 +106,46 @@ def get_niche(caption: str, hashtags: list[str]) -> int:
         return result
     # AI said Other or failed → still engage as designer to avoid skipping niche reels
     return NICHE_DESIGNER
+
+
+def get_niche_with_extra_text(caption: str, hashtags: list[str], extra_text: str) -> int:
+    """
+    Same logic as get_niche, but allows appending extra text (e.g. OCR from TikTok
+    on-screen hooks) to the caption before classification.
+    """
+    merged_caption = f"{caption or ''} {extra_text or ''}".strip()
+    return get_niche(merged_caption, hashtags)
+
+
+async def extract_tiktok_ocr_text(page) -> str:
+    """
+    Optional OCR helper for TikTok videos.
+
+    If ENABLE_TIKTOK_OCR is False or pytesseract/Tesseract are not available,
+    this returns an empty string so callers can safely ignore it.
+    """
+    if not ENABLE_TIKTOK_OCR:
+        return ""
+    try:
+        import pytesseract  # type: ignore
+        from PIL import Image
+    except Exception:
+        logger.warning("TikTok OCR requested but pytesseract/Pillow not available; skipping.")
+        return ""
+    try:
+        # Take a screenshot of the viewport and crop center region where text overlays usually are.
+        png_bytes = await page.screenshot(full_page=False)
+        from io import BytesIO
+
+        img = Image.open(BytesIO(png_bytes))
+        w, h = img.size
+        left = int(w * 0.15)
+        right = int(w * 0.85)
+        top = int(h * 0.25)
+        bottom = int(h * 0.75)
+        crop = img.crop((left, top, right, bottom))
+        text = pytesseract.image_to_string(crop)
+        return (text or "").strip()
+    except Exception as e:
+        logger.warning("TikTok OCR failed: %s", e)
+        return ""
