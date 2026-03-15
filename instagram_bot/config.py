@@ -150,6 +150,7 @@ REELS_PER_SOURCE_BEFORE_SWITCH = 10
 # =============================================================================
 
 TIKTOK_BASE_URL = "https://www.tiktok.com/"
+TIKTOK_PROFILE_DIR = Path(__file__).resolve().parent / "bot" / "tiktok_profile"
 
 # TikTok search / priming keywords (similar niche to Instagram config)
 TIKTOK_SEARCH_KEYWORDS = [

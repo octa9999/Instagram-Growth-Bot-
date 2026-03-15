@@ -20,6 +20,7 @@ from config import (
     AUTHOR_MAX_ENGAGEMENTS_PER_SESSION,
     RECENT_REEL_DEDUP_MAX,
     TIKTOK_MAX_SESSION_MINUTES,
+    MAX_SESSION_HOURS,
 )
 from bot.browser import create_browser, create_browser_no_login
 from bot.reels_scroller import (
@@ -219,23 +220,47 @@ async def run_loop(page, sources: list, current_index: int) -> None:
 
 
 async def main_async() -> None:
-    # Simple CLI switch: default IG, TikTok when '--platform=tt' or 'tt' present
-    platform = "ig"
+    # Determine platform from CLI args if provided; otherwise ask interactively.
+    platform = None
     for arg in sys.argv[1:]:
         lower = arg.lower()
         if lower in ("--platform=tt", "--platform=tiktok", "tt", "tiktok"):
             platform = "tt"
         elif lower in ("--platform=ig", "--platform=instagram", "ig", "instagram"):
             platform = "ig"
+        elif lower in ("--platform=both", "both"):
+            platform = "both"
 
     report_path = session_report.start_session()
     print(f"Session report (live): {report_path}")
 
+    if platform is None:
+        print("Select platform to run:")
+        print("  1) Instagram only")
+        print("  2) TikTok only (experimental, higher ban risk)")
+        print("  3) Both (Instagram then TikTok)")
+        choice = input("Enter 1, 2, or 3: ").strip()
+        if choice == "2":
+            platform = "tt"
+        elif choice == "3":
+            platform = "both"
+        else:
+            platform = "ig"
+
     if platform == "tt":
         print("TikTok Bot Started (experimental, higher ban risk)")
+        session_report.set_platform("tt")
+        await _run_tiktok_main()
+    elif platform == "both":
+        print("Instagram Bot Started (part 1 of both)")
+        session_report.set_platform("ig")
+        await _run_instagram_main()
+        print("TikTok Bot Started (part 2 of both, experimental, higher ban risk)")
+        session_report.set_platform("tt")
         await _run_tiktok_main()
     else:
         print("Instagram Bot Started")
+        session_report.set_platform("ig")
         await _run_instagram_main()
 
 
@@ -244,10 +269,17 @@ async def _run_instagram_main() -> None:
     current_index = 0
     reels_count = 0
     browser = context = page = None
+    loop = asyncio.get_event_loop()
+    start_time = loop.time()
     try:
         browser, context, page = await create_browser(headless=False)
         await _open_current_source(page, "feed", None)
         while True:
+            # Optional session cap for safety
+            elapsed_hours = (loop.time() - start_time) / 3600.0
+            if MAX_SESSION_HOURS and elapsed_hours >= MAX_SESSION_HOURS:
+                logger.info("Instagram session reached max hours (%.2f), stopping.", elapsed_hours)
+                break
             await run_loop(page, sources, current_index)
             reels_count += 1
             if REELS_PER_SOURCE_BEFORE_SWITCH and reels_count >= REELS_PER_SOURCE_BEFORE_SWITCH:
